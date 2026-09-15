@@ -53,6 +53,7 @@ jobs:
         run: |
           python -m app.ingest --full
           python -m app.ingest --fpl
+          python -m app.ingest --fdcouk
           python -m app.export_static --out ../docs/data
 
       - name: Save sync database
