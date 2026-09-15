@@ -24,6 +24,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Require API token
+        run: |
+          if [ -z "${{ secrets.FOOTBALL_DATA_API_TOKEN }}" ]; then
+            echo "::error::FOOTBALL_DATA_API_TOKEN repo secret is not set (Settings > Secrets and variables > Actions). Without it, every sync call is silently skipped and this workflow would otherwise commit an empty data snapshot over the real one."
+            exit 1
+          fi
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
