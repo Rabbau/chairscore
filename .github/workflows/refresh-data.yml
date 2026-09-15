@@ -1,0 +1,70 @@
+# Keeps the GitHub Pages snapshot (docs/) current without a 24/7 backend.
+#
+# One-time setup before this does anything useful:
+#   1. Settings -> Secrets and variables -> Actions -> New repository secret
+#      FOOTBALL_DATA_API_TOKEN = <your token>
+#   2. Settings -> Pages -> Source: "Deploy from a branch" -> branch: main (or
+#      whichever you push to), folder: /docs
+#
+# Not exercised in CI ahead of time (no GitHub remote at authoring time) —
+# check the Actions tab after the first run / after pushing.
+name: Refresh static data
+
+on:
+  schedule:
+    - cron: "17 5 * * *" # once a day; matches update daily, not live
+  workflow_dispatch: {} # manual "Run workflow" button
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Rolling cache of the sync DB so each run is an incremental sync (like
+      # the live deploy's scheduler) instead of rebuilding years of history
+      # from zero every day. restore-keys grabs the most recent prior save;
+      # a unique save key is required because a cache key, once saved, is
+      # immutable in Actions.
+      - name: Restore sync database
+        uses: actions/cache/restore@v4
+        with:
+          path: backend/chairscore.db
+          key: chairscore-db-${{ github.run_id }}
+          restore-keys: |
+            chairscore-db-
+
+      - name: Install backend
+        working-directory: backend
+        run: pip install -e .
+
+      - name: Sync + export
+        working-directory: backend
+        env:
+          FOOTBALL_DATA_API_TOKEN: ${{ secrets.FOOTBALL_DATA_API_TOKEN }}
+          DATABASE_URL: sqlite:///./chairscore.db
+        run: |
+          python -m app.ingest --full
+          python -m app.ingest --fpl
+          python -m app.export_static --out ../docs/data
+
+      - name: Save sync database
+        uses: actions/cache/save@v4
+        with:
+          path: backend/chairscore.db
+          key: chairscore-db-${{ github.run_id }}
+
+      - name: Commit updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/data
+          git diff --cached --quiet || git commit -m "chore: refresh static data snapshot"
+          git push

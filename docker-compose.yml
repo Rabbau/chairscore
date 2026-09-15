@@ -1,0 +1,58 @@
+# Full stack: Postgres + API + static frontend (nginx).
+#
+#   cp backend/.env.example backend/.env   # then fill in the tokens
+#   docker compose up --build              # http://localhost:8080
+#
+# Just Postgres for local dev against `uvicorn --reload`:
+#   docker compose up db
+#   # then in backend/.env:
+#   # DATABASE_URL=postgresql+psycopg://chairscore:chairscore@localhost:5432/chairscore
+name: chairscore
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: chairscore
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chairscore}
+      POSTGRES_DB: chairscore
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chairscore"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    # Reuse backend/.env for the API tokens; the values below override the
+    # infra-specific ones (DB host, CORS) for the compose network.
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://chairscore:${POSTGRES_PASSWORD:-chairscore}@db:5432/chairscore
+      ENABLE_SCHEDULER: "true"
+      RUN_MIGRATIONS_ON_STARTUP: "true"
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    environment:
+      API_UPSTREAM: backend:8000
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
