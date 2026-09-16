@@ -1,4 +1,4 @@
-# Chairscore
+# [Chairscore](https://rabbau.github.io/chairscore/)
 
 Football stats site (SofaScore-style) — league tables, fixtures, results, match details, top scorers.
 
