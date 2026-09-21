@@ -147,7 +147,9 @@ def export_home_window(db: Session, out: Path) -> int:
 def export_search_index(db: Session, out: Path) -> None:
     from app.schemas.common import TeamOut
 
-    comps = db.scalars(select(Competition)).all()
+    comps = db.scalars(
+        select(Competition).where(Competition.code.in_(settings.served_competition_codes))
+    ).all()
     teams = db.scalars(select(Team)).all()
     _write(
         out / "search-index.json",
@@ -163,7 +165,11 @@ def run(out_dir: Path, *, all_seasons: bool = False) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with SessionLocal() as db:
-        comps = db.scalars(select(Competition).order_by(Competition.name)).all()
+        comps = db.scalars(
+            select(Competition)
+            .where(Competition.code.in_(settings.served_competition_codes))
+            .order_by(Competition.name)
+        ).all()
         _write(
             out_dir / "competitions.json",
             [_dump(CompetitionOut.model_validate(c)) for c in comps],
@@ -174,10 +180,8 @@ def run(out_dir: Path, *, all_seasons: bool = False) -> None:
         log.info("home window: %d matches", n_home)
 
         detail_ids: list[int] = []
-        tracked = set(settings.tracked_competition_codes)
+        tracked = set(settings.served_competition_codes)
         for comp in comps:
-            if comp.code not in tracked:
-                continue
             ids = export_competition(db, out_dir, comp, all_seasons=all_seasons)
             detail_ids += ids
             log.info("[%s] exported (%d matches queued for detail)", comp.code, len(ids))

@@ -1,6 +1,6 @@
 """Football-Data.co.uk enrichment — team-level match statistics (shots,
-corners, cards, xG where the source has it) for recently finished matches
-across every tracked competition this source covers (all 5 by default, not
+corners, cards, xG where the source has it) for finished matches of the
+current season across every tracked competition this source covers (all 5 by default, not
 just one league like the FPL provider).
 
 One CSV per competition-season, cached for the whole run — cheap enough that
@@ -13,13 +13,14 @@ catches up) pick the match back up.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.db import SessionLocal
+from app.ingest.sync import current_season_of
 from app.models import Competition, Match, MatchTeamStat
 from app.providers import get_fdcouk_provider
 from app.providers.football_data_co_uk import FootballDataCoUkProvider
@@ -60,7 +61,6 @@ def enrich_fdcouk_matches() -> int:
         log.info("football-data.co.uk provider disabled (FDCOUK_ENABLED=false) — skipping")
         return 0
 
-    since = _now() - timedelta(days=settings.fdcouk_window_days)
     budget = settings.fdcouk_max_matches_per_run
     enriched = 0
 
@@ -77,7 +77,7 @@ def enrich_fdcouk_matches() -> int:
                 .where(
                     Match.competition_id == comp.id,
                     Match.status.in_(_FINISHED),
-                    Match.utc_date >= since,
+                    Match.season == current_season_of(db, comp),
                     Match.fdcouk_synced_at.is_(None),
                 )
                 .order_by(Match.utc_date.desc())

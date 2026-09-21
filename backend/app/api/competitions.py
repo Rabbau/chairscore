@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import match_query
+from app.config import settings
 from app.db import get_db
 from app.models import Competition, Match, Scorer, Standing
 from app.schemas import CompetitionOut, MatchOut, ScorersOut, StandingsOut
@@ -36,7 +37,10 @@ def _resolve_season(db: Session, model, comp_id: int, season: str | None) -> str
 @router.get("", response_model=list[CompetitionOut])
 def list_competitions(db: Session = Depends(get_db)):
     order = func.coalesce(Competition.type, "").desc()  # LEAGUE before CUP
-    return db.scalars(select(Competition).order_by(order, Competition.name)).all()
+    # The table is seeded with every football-data.org free-tier competition;
+    # only the ones we sync have anything to show.
+    stmt = select(Competition).where(Competition.code.in_(settings.served_competition_codes))
+    return db.scalars(stmt.order_by(order, Competition.name)).all()
 
 
 @router.get("/{code}", response_model=CompetitionOut)

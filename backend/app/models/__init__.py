@@ -7,12 +7,13 @@ from app.models.match import Match
 from app.models.player import Player
 from app.models.scorer import Scorer
 from app.models.standing import Standing
-from app.models.team import Team
+from app.models.team import Team, TeamExternalRef
 
 __all__ = [
     "Competition",
     "CompetitionTeam",
     "Team",
+    "TeamExternalRef",
     "Player",
     "Match",
     "Goal",

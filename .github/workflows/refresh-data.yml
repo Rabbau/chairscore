@@ -58,9 +58,17 @@ jobs:
           FOOTBALL_DATA_API_TOKEN: ${{ secrets.FOOTBALL_DATA_API_TOKEN }}
           DATABASE_URL: sqlite:///./chairscore.db
         run: |
+          # --full also pulls the Champions / Europa League season from UEFA
+          # (after the leagues, so UEFA's clubs can be matched onto their
+          # league teams); --uefa then adds lineups + events for new results.
           python -m app.ingest --full
+          # Put back whatever the last snapshot already holds (stats older than
+          # the providers' look-back windows) — a cold cache would otherwise
+          # drop it from the next export. Adds only what's missing.
+          python -m app.restore_static --from ../docs/data
           python -m app.ingest --fpl
           python -m app.ingest --fdcouk
+          python -m app.ingest --uefa
           python -m app.export_static --out ../docs/data
 
       - name: Save sync database

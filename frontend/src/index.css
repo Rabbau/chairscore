@@ -486,9 +486,35 @@ h1, h2, h3 { margin: 0; font-weight: 700; }
 .rating-row__name { grid-area: name; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rating-row__marks { font-size: 11px; }
 .rating-row__meta { grid-area: meta; font-size: 11px; }
+.sub-head {
+  padding: 6px 12px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.sub-head:not(:first-child) { border-top: 1px solid var(--border); }
+.rating-row--dim { opacity: 0.45; }
 /* mirror the away column so the score sits against the centre divider */
 .rating-row--right {
   grid-template-columns: 1fr auto;
   grid-template-areas: "name score" "meta score";
   text-align: right;
 }
+
+/* league-phase table zones (Champions / Europa League) ---------------------- */
+.table tbody tr.zone-top td.num { box-shadow: inset 3px 0 0 var(--accent); }
+.table tbody tr.zone-playoff td.num { box-shadow: inset 3px 0 0 #ffcf40; }
+.zone-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 8px 14px;
+  font-size: 11px;
+  border-top: 1px solid var(--border);
+}
+.zone-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+.zone-dot--top { background: var(--accent); }
+.zone-dot--playoff { background: #ffcf40; }

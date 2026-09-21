@@ -1,12 +1,19 @@
 import { Link, useParams } from 'react-router-dom'
 
-import type { Match, MatchDetail, PlayerRating, TeamStat } from '../api/types'
+import type { Match, MatchDetail, MergedTeamStat, PlayerRating, TeamStat } from '../api/types'
 import { useMatch } from '../api/client'
 import { Crest } from '../components/Crest'
 import { FormBadges } from '../components/FormBadges'
 import { MatchRow } from '../components/MatchRow'
 import { ErrorState, Loading } from '../components/States'
-import { isLive, kickoffTime, parseUtc, resultFor, type FormResult } from '../lib/format'
+import {
+  isLive,
+  kickoffTime,
+  parseUtc,
+  resultFor,
+  stageLabel,
+  type FormResult,
+} from '../lib/format'
 
 /** Recent finished matches for a team, oldest → newest, as W/D/L. */
 function formOf(matches: Match[], teamId: number): FormResult[] {
@@ -21,7 +28,18 @@ function formOf(matches: Match[], teamId: number): FormResult[] {
  * shots/corners/cards beats FPL's xG-only row for the same PL match). */
 function richestStat(stats: TeamStat[], teamId: number): TeamStat | undefined {
   const filled = (s: TeamStat) =>
-    [s.xg, s.possession, s.shots, s.shots_on_target, s.corners, s.fouls, s.yellow_cards, s.red_cards, s.saves]
+    [
+      s.xg,
+      s.possession,
+      s.shots,
+      s.shots_on_target,
+      s.corners,
+      s.fouls,
+      s.offsides,
+      s.yellow_cards,
+      s.red_cards,
+      s.saves,
+    ]
       .filter((v) => v != null).length
   return stats
     .filter((s) => s.team_id === teamId)
@@ -37,10 +55,18 @@ export function MatchPage() {
   if (!match) return null
 
   const done = match.status === 'FINISHED' || match.status === 'AWARDED'
+  const fullTime =
+    match.duration === 'PENALTY_SHOOTOUT'
+      ? 'After penalties'
+      : match.duration === 'EXTRA_TIME'
+        ? 'After extra time'
+        : 'Full time'
+  const stage = stageLabel(match.stage)
+  const hasShootout = match.home_score_pen != null && match.away_score_pen != null
   const statusText = isLive(match.status)
     ? 'LIVE'
     : done
-      ? 'Full time'
+      ? fullTime
       : `${parseUtc(match.utc_date).toLocaleDateString([], {
           weekday: 'long',
           day: 'numeric',
@@ -53,6 +79,7 @@ export function MatchPage() {
         <Link to={`/competitions/${match.competition.code}`} className="muted">
           ‹ {match.competition.name}
         </Link>
+        {stage && <span className="faint"> · {stage}</span>}
       </div>
 
       <div className="card">
@@ -72,8 +99,13 @@ export function MatchPage() {
             <div className={`chip${isLive(match.status) ? ' chip--live' : ''}`} style={{ marginTop: 8 }}>
               {statusText}
             </div>
-            {match.home_score_ht != null && (
+            {hasShootout && (
               <div className="faint" style={{ fontSize: 12, marginTop: 6 }}>
+                Penalties {match.home_score_pen}–{match.away_score_pen}
+              </div>
+            )}
+            {match.home_score_ht != null && (
+              <div className="faint" style={{ fontSize: 12, marginTop: hasShootout ? 2 : 6 }}>
                 HT {match.home_score_ht}–{match.away_score_ht}
               </div>
             )}
@@ -89,6 +121,7 @@ export function MatchPage() {
 
       <EventsCard match={match} />
       <MatchStatsCard match={match} />
+      <LineupsCard match={match} />
       <PlayerStatsCard match={match} />
       <HeadToHeadCard match={match} />
       <MatchInfoCard match={match} />
@@ -96,10 +129,17 @@ export function MatchPage() {
   )
 }
 
-const SOURCE_LABEL: Record<string, string> = {
-  fpl: 'via Fantasy Premier League',
-  'api-football': 'via API-Football',
-  'football-data.co.uk': 'via Football-Data.co.uk',
+const SOURCE_NAME: Record<string, string> = {
+  fpl: 'Fantasy Premier League',
+  'api-football': 'API-Football',
+  'football-data.co.uk': 'Football-Data.co.uk',
+  uefa: 'UEFA',
+}
+
+/** "via UEFA" / "via Football-Data.co.uk + Fantasy Premier League" */
+function viaLabel(sources: string[]): string | null {
+  const names = [...new Set(sources)].map((s) => SOURCE_NAME[s]).filter(Boolean)
+  return names.length ? `via ${names.join(' + ')}` : null
 }
 
 interface StatRowDef {
@@ -107,37 +147,56 @@ interface StatRowDef {
   home: number | null
   away: number | null
   decimals?: number
+  /** where the value came from, when it was merged from several sources */
+  source?: string
+}
+
+/** Prefer the server-side merge; fall back to picking a row for snapshots that predate it. */
+function statsFor(match: MatchDetail, teamId: number): MergedTeamStat | undefined {
+  const merged = match.merged_team_stats?.find((s) => s.team_id === teamId)
+  if (merged) return merged
+  const row = richestStat(match.team_stats ?? [], teamId)
+  return row && { ...row, sources: [row.source], field_sources: {} }
 }
 
 function MatchStatsCard({ match }: { match: MatchDetail }) {
-  const stats = match.team_stats ?? []
-  const home = richestStat(stats, match.home_team.id)
-  const away = richestStat(stats, match.away_team.id)
+  const home = statsFor(match, match.home_team.id)
+  const away = statsFor(match, match.away_team.id)
   if (!home && !away) return null
 
+  const stat = (
+    label: string,
+    key: keyof MergedTeamStat & keyof TeamStat,
+    decimals?: number,
+  ): StatRowDef => ({
+    label,
+    home: (home?.[key] as number | null | undefined) ?? null,
+    away: (away?.[key] as number | null | undefined) ?? null,
+    decimals,
+    source: home?.field_sources[key] ?? away?.field_sources[key],
+  })
+
   const rows: StatRowDef[] = [
-    { label: 'xG', home: home?.xg ?? null, away: away?.xg ?? null, decimals: 2 },
-    { label: 'Possession', home: home?.possession ?? null, away: away?.possession ?? null },
-    { label: 'Shots', home: home?.shots ?? null, away: away?.shots ?? null },
-    {
-      label: 'Shots on target',
-      home: home?.shots_on_target ?? null,
-      away: away?.shots_on_target ?? null,
-    },
-    { label: 'Corners', home: home?.corners ?? null, away: away?.corners ?? null },
-    { label: 'Fouls', home: home?.fouls ?? null, away: away?.fouls ?? null },
-    { label: 'Yellow cards', home: home?.yellow_cards ?? null, away: away?.yellow_cards ?? null },
-    { label: 'Red cards', home: home?.red_cards ?? null, away: away?.red_cards ?? null },
+    stat('xG', 'xg', 2),
+    stat('Possession', 'possession'),
+    stat('Shots', 'shots'),
+    stat('Shots on target', 'shots_on_target'),
+    stat('Corners', 'corners'),
+    stat('Fouls', 'fouls'),
+    stat('Offsides', 'offsides'),
+    stat('Saves', 'saves'),
+    stat('Yellow cards', 'yellow_cards'),
+    stat('Red cards', 'red_cards'),
   ].filter((r) => r.home != null || r.away != null)
   if (rows.length === 0) return null
 
-  const source = home?.source ?? away?.source ?? ''
+  const via = viaLabel([...(home?.sources ?? []), ...(away?.sources ?? [])])
 
   return (
     <div className="card">
       <div className="card__head">
         Match stats
-        {SOURCE_LABEL[source] && <span className="faint"> · {SOURCE_LABEL[source]}</span>}
+        {via && <span className="faint"> · {via}</span>}
       </div>
       <div className="stat-rows">
         {rows.map((r) => (
@@ -148,7 +207,7 @@ function MatchStatsCard({ match }: { match: MatchDetail }) {
   )
 }
 
-function StatRow({ label, home, away, decimals }: StatRowDef) {
+function StatRow({ label, home, away, decimals, source }: StatRowDef) {
   const h = home ?? 0
   const a = away ?? 0
   const total = h + a || 1
@@ -157,7 +216,12 @@ function StatRow({ label, home, away, decimals }: StatRowDef) {
     <div className="stat-row">
       <span className="stat-row__val">{fmt(home)}</span>
       <div className="stat-row__mid">
-        <span className="stat-row__label">{label}</span>
+        <span
+          className="stat-row__label"
+          title={source && SOURCE_NAME[source] ? `from ${SOURCE_NAME[source]}` : undefined}
+        >
+          {label}
+        </span>
         <div className="h2h-bar">
           <span className="h2h-bar__w" style={{ width: `${(h / total) * 100}%` }} />
           <span className="h2h-bar__l" style={{ width: `${(a / total) * 100}%` }} />
@@ -169,7 +233,8 @@ function StatRow({ label, home, away, decimals }: StatRowDef) {
 }
 
 function PlayerStatsCard({ match }: { match: MatchDetail }) {
-  const ratings = match.player_ratings ?? []
+  // Lineup-only sources (UEFA) have no BPS / rating to rank by — LineupsCard shows those.
+  const ratings = (match.player_ratings ?? []).filter((r) => r.rating != null || r.bps != null)
   if (ratings.length === 0) return null
 
   const source = ratings[0]?.source ?? ''
@@ -183,7 +248,7 @@ function PlayerStatsCard({ match }: { match: MatchDetail }) {
     <div className="card">
       <div className="card__head">
         Player stats
-        {SOURCE_LABEL[source] && <span className="faint"> · {SOURCE_LABEL[source]}</span>}
+        {viaLabel([source]) && <span className="faint"> · {viaLabel([source])}</span>}
       </div>
 
       <div className="ratings">
@@ -198,6 +263,105 @@ function PlayerStatsCard({ match }: { match: MatchDetail }) {
           ))}
         </div>
       </div>
+    </div>
+  )
+}
+
+const POSITION_ORDER: Record<string, number> = { GKP: 0, DEF: 1, MID: 2, FWD: 3 }
+
+function LineupsCard({ match }: { match: MatchDetail }) {
+  // Lineup-only sources (UEFA) know shirt numbers but have nothing to rank
+  // players by; sources with a BPS / rating are PlayerStatsCard's.
+  const lineup = (match.player_ratings ?? []).filter(
+    (r) => r.rating == null && r.bps == null && r.number != null,
+  )
+  if (lineup.length === 0) return null
+  const source = lineup[0]?.source ?? ''
+
+  const byPosition = (a: PlayerRating, b: PlayerRating) =>
+    (POSITION_ORDER[a.position ?? ''] ?? 9) - (POSITION_ORDER[b.position ?? ''] ?? 9) ||
+    (a.number ?? 0) - (b.number ?? 0)
+  const playedFirst = (a: PlayerRating, b: PlayerRating) =>
+    Number((b.minutes ?? 0) > 0) - Number((a.minutes ?? 0) > 0) || (a.number ?? 0) - (b.number ?? 0)
+
+  const column = (teamId: number, align?: 'right') => {
+    const players = lineup.filter((r) => r.team_id === teamId)
+    const starters = players.filter((r) => r.is_starter).sort(byPosition)
+    const bench = players.filter((r) => !r.is_starter).sort(playedFirst)
+    return (
+      <div className="ratings__col">
+        <div className="sub-head">Starting XI</div>
+        {starters.map((r) => (
+          <LineupRow key={r.player_name} r={r} match={match} align={align} />
+        ))}
+        {bench.length > 0 && <div className="sub-head">Substitutes</div>}
+        {bench.map((r) => (
+          <LineupRow key={r.player_name} r={r} match={match} align={align} />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="card">
+      <div className="card__head">
+        Lineups
+        {viaLabel([source]) && <span className="faint"> · {viaLabel([source])}</span>}
+      </div>
+      <div className="ratings">
+        {column(match.home_team.id)}
+        {column(match.away_team.id, 'right')}
+      </div>
+    </div>
+  )
+}
+
+function LineupRow({
+  r,
+  match,
+  align,
+}: {
+  r: PlayerRating
+  match: MatchDetail
+  align?: 'right'
+}) {
+  const marks = [
+    '⚽'.repeat(r.goals ?? 0),
+    '🅰'.repeat(r.assists ?? 0),
+    (r.red ?? 0) > 0 ? '🟥' : (r.yellow ?? 0) > 0 ? '🟨' : '',
+  ].join('')
+  const swap = (side: 'in' | 'out') =>
+    match.substitutions.find(
+      (s) =>
+        s.team_id === r.team_id &&
+        (side === 'in' ? s.player_in_name : s.player_out_name) === r.player_name,
+    )
+  const on = swap('in')
+  const off = swap('out')
+  const meta = [
+    r.position,
+    on && `⬆ ${on.minute}'`,
+    off && `⬇ ${off.minute}'`,
+    (r.saves ?? 0) > 0 && `${r.saves} saves`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const unused = !r.is_starter && (r.minutes ?? 0) === 0
+
+  return (
+    <div
+      className={`rating-row${align === 'right' ? ' rating-row--right' : ''}${
+        unused ? ' rating-row--dim' : ''
+      }`}
+    >
+      <span className="rating-row__score" title="shirt number">
+        {r.number}
+      </span>
+      <span className="rating-row__name">
+        {r.player_name}
+        {marks && <span className="rating-row__marks"> {marks}</span>}
+      </span>
+      <span className="rating-row__meta faint">{meta}</span>
     </div>
   )
 }
@@ -302,13 +466,20 @@ function MatchInfoCard({ match }: { match: MatchDetail }) {
 }
 
 function EventsCard({ match }: { match: MatchDetail }) {
-  type Ev = { minute: number | null; side: 'home' | 'away' | null; icon: string; text: string }
+  type Ev = {
+    minute: number | null
+    injury?: number | null
+    side: 'home' | 'away' | null
+    icon: string
+    text: string
+  }
   const side = (teamId: number | null): 'home' | 'away' | null =>
     teamId === match.home_team.id ? 'home' : teamId === match.away_team.id ? 'away' : null
 
-  const events: Ev[] = [
+  const events = ([
     ...match.goals.map((g) => ({
       minute: g.minute,
+      injury: g.injury_time,
       side: side(g.team_id),
       icon: g.type === 'PENALTY' ? '⚽(P)' : g.type === 'OWN' ? '⚽(OG)' : '⚽',
       text: [g.scorer_name, g.assist_name && `(assist: ${g.assist_name})`].filter(Boolean).join(' '),
@@ -325,7 +496,9 @@ function EventsCard({ match }: { match: MatchDetail }) {
       icon: '🔁',
       text: `${s.player_in_name ?? '?'} ⬆ / ${s.player_out_name ?? '?'} ⬇`,
     })),
-  ].sort((a, b) => (a.minute ?? 999) - (b.minute ?? 999))
+  ] as Ev[]).sort(
+    (a, b) => (a.minute ?? 999) - (b.minute ?? 999) || (a.injury ?? 0) - (b.injury ?? 0),
+  )
 
   // Free football-data.org tier has no event timeline — just skip the card.
   if (events.length === 0) return null
@@ -336,7 +509,9 @@ function EventsCard({ match }: { match: MatchDetail }) {
       <ul className="timeline">
         {events.map((e, i) => (
           <li key={i}>
-            <span className="min">{e.minute != null ? `${e.minute}'` : ''}</span>
+            <span className="min">
+              {e.minute != null ? `${e.minute}${e.injury ? `+${e.injury}` : ''}'` : ''}
+            </span>
             <span>{e.icon}</span>
             <span style={{ textAlign: e.side === 'away' ? 'right' : 'left' }}>{e.text}</span>
           </li>

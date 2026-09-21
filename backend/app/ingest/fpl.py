@@ -1,5 +1,5 @@
 """FPL enrichment — per-player match data (goals, assists, cards, saves, bonus,
-BPS, and optionally xG/xA) for recently finished **Premier League** matches.
+BPS, and optionally xG/xA) for finished **Premier League** matches of the current season.
 
 Mirrors ``ingest.depth`` but for the FPL provider: resolve the FPL fixture for a
 football-data match (team name + date), fetch the depth bundle, write
@@ -9,13 +9,14 @@ football-data match (team name + date), fetch the depth bundle, write
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.db import SessionLocal
+from app.ingest.sync import current_season_of
 from app.models import Competition, Match, MatchExternalRef, MatchPlayerRating, MatchTeamStat
 from app.providers import get_fpl_provider
 from app.providers.api_football import _name_overlap
@@ -113,7 +114,6 @@ def enrich_fpl_matches() -> int:
         return 0
 
     code = settings.fpl_competition_code
-    since = _now() - timedelta(days=settings.fpl_window_days)
     enriched = 0
 
     with SessionLocal() as db:
@@ -128,7 +128,7 @@ def enrich_fpl_matches() -> int:
             .where(
                 Match.competition_id == comp.id,
                 Match.status.in_(_FINISHED),
-                Match.utc_date >= since,
+                Match.season == current_season_of(db, comp),
                 Match.fpl_synced_at.is_(None),
             )
             .order_by(Match.utc_date.desc())

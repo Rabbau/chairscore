@@ -48,6 +48,9 @@ export interface Match {
   away_score: number | null
   home_score_ht: number | null
   away_score_ht: number | null
+  /** Penalty shoot-out score (cup ties); the scores above exclude it. */
+  home_score_pen?: number | null
+  away_score_pen?: number | null
   winner: 'HOME_TEAM' | 'AWAY_TEAM' | 'DRAW' | null
   competition: Competition
   home_team: Team
@@ -109,6 +112,13 @@ export interface TeamStat {
   xg: number | null
 }
 
+/** One team's stats with every source folded together (server-side merge). */
+export interface MergedTeamStat extends Omit<TeamStat, 'source'> {
+  sources: string[]
+  /** stat name -> the source its value came from */
+  field_sources: Record<string, string>
+}
+
 export interface PlayerRating {
   team_id: number | null
   source: string
@@ -138,6 +148,8 @@ export interface MatchDetail extends Match {
   bookings: Booking[]
   substitutions: Substitution[]
   team_stats: TeamStat[]
+  /** Absent in a snapshot exported before the server-side merge existed. */
+  merged_team_stats?: MergedTeamStat[]
   player_ratings: PlayerRating[]
   head_to_head: HeadToHead | null
   home_form: Match[]

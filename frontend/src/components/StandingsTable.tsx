@@ -13,7 +13,22 @@ function parseForm(form: string | null): FormResult[] {
     .filter((s): s is FormResult => s === 'W' || s === 'D' || s === 'L')
 }
 
-export function StandingsTable({ rows, showForm = true }: { rows: StandingRow[]; showForm?: boolean }) {
+/** Top 8 go straight to the round of 16, 9th-24th to the knockout play-offs.
+ * Counted by row, not by the printed rank: tied teams share a rank number. */
+function zoneOf(place: number): string {
+  return place <= 8 ? 'zone-top' : place <= 24 ? 'zone-playoff' : ''
+}
+
+export function StandingsTable({
+  rows,
+  showForm = true,
+  zones = false,
+}: {
+  rows: StandingRow[]
+  showForm?: boolean
+  /** Colour the league-phase qualification zones (36-team UEFA format). */
+  zones?: boolean
+}) {
   return (
     <div style={{ overflowX: 'auto' }}>
       <table className="table">
@@ -33,8 +48,8 @@ export function StandingsTable({ rows, showForm = true }: { rows: StandingRow[];
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.team.id}>
+          {rows.map((r, i) => (
+            <tr key={r.team.id} className={zones ? zoneOf(i + 1) : undefined}>
               <td className="num">{r.position}</td>
               <td>
                 <Link to={`/teams/${r.team.id}`} className="team-cell">
@@ -59,6 +74,18 @@ export function StandingsTable({ rows, showForm = true }: { rows: StandingRow[];
           ))}
         </tbody>
       </table>
+      {zones && (
+        <div className="zone-legend faint">
+          <span>
+            <span className="zone-dot zone-dot--top" />
+            Round of 16
+          </span>
+          <span>
+            <span className="zone-dot zone-dot--playoff" />
+            Knockout play-off
+          </span>
+        </div>
+      )}
     </div>
   )
 }

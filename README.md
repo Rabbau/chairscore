@@ -6,7 +6,9 @@ Football stats site (SofaScore-style) — league tables, fixtures, results, matc
 - **Frontend:** React + TypeScript (Vite) · React Router · TanStack Query
 - **Data sources:** [football-data.org](https://www.football-data.org/) v4 (free) +
   [Fantasy Premier League](https://fantasy.premierleague.com/api/) (free, current PL season) +
-  [Football-Data.co.uk](https://football-data.co.uk) (free CSV, match stats for all 5 leagues)
+  [Football-Data.co.uk](https://football-data.co.uk) (free CSV, match stats for all 5 leagues) +
+  [UEFA](https://www.uefa.com)'s own key-less API (Champions League + Europa League, incl.
+  lineups and events)
 - **DB:** SQLite in dev, PostgreSQL in production
 - **Also ships as a static site** — `docs/`, no backend needed, see
   [Static export & GitHub Pages](#static-export--github-pages)
@@ -55,8 +57,10 @@ App runs at http://localhost:5173
 
 Register (free, email only) at https://www.football-data.org/client/register and put the
 token in `backend/.env` as `FOOTBALL_DATA_API_TOKEN`. Free tier: 10 requests/minute,
-~13 competitions (Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Champions
-League, and more).
+~13 competitions (Premier League, La Liga, Bundesliga, Serie A, Ligue 1, and more).
+The **Champions League and Europa League don't need it** — they come from UEFA's own
+key-less API (below), which also has the Europa League that football-data.org's free
+tier lacks.
 
 ## Data sources
 
@@ -79,6 +83,21 @@ requests, not one per match. Team names differ from football-data.org's
 overlap plus a small alias table for the genuine abbreviations (`app/providers/football_data_co_uk.py`).
 Toggle with `FDCOUK_ENABLED`.
 
+**Breadth + depth, Champions League & Europa League — [UEFA](https://www.uefa.com) (free, no key, on by default):**
+the backends uefa.com itself calls (`match.` / `standings.` / `compstats.uefa.com`,
+each publishes an OpenAPI spec at `/v3/api-docs`): fixtures and results (incl.
+extra time and penalty shoot-outs), the league-phase table, top scorers, **lineups**
+and the full **event feed** — goals with assists and running score, cards,
+substitutions. There is no per-match team-stats endpoint, so shots, shots on
+target, corners, fouls, offsides, cards and saves are *counted from the event
+feed* (checked against UEFA's own aggregates: on-target shots, corners, fouls and
+yellows matched exactly); possession and passes aren't available per match.
+UEFA's clubs are matched onto the league teams football-data.org already created
+(name + UEFA's three-letter code, recorded in `team_external_refs`), so Arsenal is
+one team, with one head-to-head history, in the league and in Europe. Toggle with
+`UEFA_ENABLED`; which competitions with `UEFA_COMPETITIONS` (`CL,EL`). Unofficial:
+fine for a personal project, but it can change or block without notice.
+
 **Depth, any tracked league — [API-Football](https://dashboard.api-football.com/) (optional, off by default):**
 goal / card / substitution timeline, per-team statistics (possession, shots,
 xG …) and 0–10 player ratings. Provider + pipeline are built and tested, but the
@@ -90,7 +109,21 @@ The provider layer (`backend/app/providers/`) normalizes every source behind the
 same dataclasses; the DB and API code never see a raw provider response. Each
 depth source resolves a football-data match to its own fixture id by team name +
 date, caches it in `match_external_refs`, and writes `match_team_stats` /
-`match_player_ratings` rows tagged with its `source`.
+`match_player_ratings` rows tagged with its `source`. When several sources cover
+one match (a Premier League game has Football-Data.co.uk *and* FPL), the API folds
+them into one row per team (`app/merge.py`, `merged_team_stats`): each stat comes
+from the most trusted source that has it, and the UI says which.
+
+**Coverage today** (`python -m app.report` prints this for your own database):
+
+| | results & table | team stats | events | lineups | player stats |
+|-|-|-|-|-|-|
+| Premier League | ✅ | shots, SOT, corners, fouls, cards, xG | – | – | ✅ FPL: BPS, xG/xA |
+| La Liga · Bundesliga · Serie A · Ligue 1 | ✅ | shots, SOT, corners, fouls, cards, xG | – | – | – |
+| Champions League · Europa League | ✅ | shots, SOT, corners, fouls, offsides, cards, saves | ✅ | ✅ | minutes, goals, assists, cards |
+
+Still no free source for possession / passes anywhere, or for events and lineups
+in the four leagues besides the Premier League.
 
 ## Data-source alternatives
 
@@ -106,15 +139,22 @@ existing normalized dataclasses:
 | **[FBref](https://fbref.com)** (StatsBomb) | free | full player + team match stats, xG, **lineups**, formations | dozens of comps, current season | `soccerdata.FBref`; 1 req / 3 s, ToS discourages scraping/redistribution — fine for personal use |
 | **[StatsBomb Open Data](https://github.com/statsbomb/open-data)** | free, CC BY-NC-SA | full **event-level** data, xG, freeze frames | World Cups, Euro 2024, Bundesliga 23-24, WSL, Messi-era Barça… | legally clean; great for a showcase, not for current top-5 leagues |
 | **[Football-Data.co.uk](https://www.football-data.co.uk)** | free CSV | shots, SOT, corners, fouls, cards, **team xG** (2026-27+) | ~22 leagues, decades + current | ✅ **integrated** (`app/providers/football_data_co_uk.py`); `--fdcouk`. No lineups/events/player stats |
-| **[TheSportsDB](https://www.thesportsdb.com)** | ~$3–9/mo Patreon | lineups, event timeline | popular leagues, current season | real API + key; cheaper but less consistent than API-Football |
+| **[UEFA](https://www.uefa.com)** (`match.uefa.com` …) | free, no key | fixtures, lineups, event feed, tables, scorers | **Champions League, Europa League** (+ Conference) | ✅ **integrated** (`app/providers/uefa.py`); `--uefa`. Unofficial but first-party; possession/passes not per match |
+| **[Premier League](https://www.premierleague.com) official API** (`footballapi.pulselive.com`) | free, no key (sends the site's `Origin` header) | 150+ team stats per match **incl. possession + passes**, events, lineups | Premier League only | 🔎 verified reachable (2026-09), **not integrated** — the natural next gap-filler for PL |
+| **[TheSportsDB](https://www.thesportsdb.com)** | free key is truncated to 5 rows per response; ~$3–9/mo Patreon for real data | lineups, event timeline, stats | popular leagues, current season | real API + key; cheaper but less consistent than API-Football |
 
-**Where this leaves us:** FPL covers current-season PL per-player depth, and
-Football-Data.co.uk now covers current-season team-level match stats (+ xG) for
-**all 5** tracked leagues — both free, both done. What's still missing for the
-other 4 leagues: lineups, an event timeline, and per-player ratings. FBref via
-`soccerdata` is the realistic free option there (mind the ToS); otherwise
-API-Football Pro is the clean paid upgrade — the pipeline already supports it,
-and its free tier can enrich 2022–24 today.
+**Where this leaves us:** FPL covers current-season PL per-player depth,
+Football-Data.co.uk covers team-level match stats (+ xG) for **all 5** leagues,
+and UEFA covers the Champions and Europa League end to end — all free, all done.
+What's still missing for the other 4 leagues: lineups, an event timeline, and
+possession / passes. FBref via `soccerdata` is the realistic free option there
+(mind the ToS); otherwise API-Football Pro is the clean paid upgrade — the
+pipeline already supports it, and its free tier can enrich 2022–24 today.
+
+Probed from a home connection in 2026-09 and **not usable**: ESPN's site API
+(Akamai "Access Denied"), FBref (Cloudflare challenge), Sofascore and Understat
+(blocked). openfootball has fresh fixtures for eight leagues but only scores —
+no goals or stats.
 
 Scraping Sofascore / FlashScore / WhoScored internal endpoints would give
 everything including ratings, but violates their ToS, breaks without notice, and
@@ -130,17 +170,28 @@ gets IPs blocked — not viable for a public site.
 .venv/Scripts/python -m app.ingest --depth       # API-Football events/stats/ratings
 .venv/Scripts/python -m app.ingest --fpl         # FPL per-player data (current PL season)
 .venv/Scripts/python -m app.ingest --fdcouk      # Football-Data.co.uk match stats (all leagues)
+.venv/Scripts/python -m app.ingest --uefa        # Champions/Europa League: fixtures, then lineups + events
 .venv/Scripts/python -m app.ingest --seasons 2023,2024,2025   # backfill past results
 ```
 
 `--seasons` pulls past-season match results (one request per competition per
-season). They power head-to-head on the match page and, later, a season switcher.
+season). They power head-to-head on the match page and the season switcher.
+`--full` also pulls the Champions / Europa League season from UEFA (after the
+leagues, so UEFA's clubs can be matched onto their league teams).
+
+The enrichers (`--fpl`, `--fdcouk`, `--uefa`) are **gap-fillers**: each run takes
+the finished matches of the *current season* that still lack that source's data,
+newest first, up to a per-run budget (`FPL_MAX_MATCHES_PER_RUN`,
+`FDCOUK_MAX_MATCHES_PER_RUN`, `UEFA_MAX_MATCHES_PER_RUN`) — so a backlog fills in
+over a few runs instead of being skipped once it is older than a couple of weeks.
+`python -m app.report` shows what is still missing.
 
 With a token set, the backend self-syncs on a schedule (one pass ~15s after
 start, then matches every 15 min, standings every 6 h, reference data daily,
-FPL + Football-Data.co.uk every 6 h, and — when `API_FOOTBALL_KEY` is set —
-depth every 12 h). Trigger over HTTP: `POST /api/admin/sync?mode=full` (or
-`matches` / `standings` / `reference` / `depth` / `fpl` / `fdcouk`) with header
+FPL + Football-Data.co.uk every 6 h, UEFA every 30 min, and — when
+`API_FOOTBALL_KEY` is set — depth every 12 h). Trigger over HTTP:
+`POST /api/admin/sync?mode=full` (or `matches` / `standings` / `reference` /
+`depth` / `fpl` / `fdcouk` / `uefa`) with header
 `X-Admin-Token: <ADMIN_TOKEN>`.
 
 **Running with `ENABLE_SCHEDULER=false`** (handy while iterating locally so
@@ -272,10 +323,17 @@ How it holds together:
 - **Keeping it current.** `.github/workflows/refresh-data.yml` — a daily
   scheduled Action that syncs (incrementally, via a rolling cache of the sync
   DB) and re-exports `docs/data`, then commits it. Needs a
-  `FOOTBALL_DATA_API_TOKEN` repository secret. **Written but not exercised**
-  (no GitHub remote at authoring time) — watch its first run in the Actions
-  tab. Skip it entirely and just re-run the two commands above by hand
-  whenever you want a fresher snapshot.
+  `FOOTBALL_DATA_API_TOKEN` repository secret (the job fails loudly without
+  it, rather than committing an empty snapshot). Skip it entirely and just
+  re-run the two commands above by hand whenever you want a fresher snapshot.
+- **The committed JSON is the data store.** Every match's detail file keeps
+  what the enrichment providers collected (events, stats, lineups — each
+  tagged with its source), so `docs/data` doubles as a durable copy of it all.
+  `python -m app.restore_static --from ../docs/data` puts back whatever a
+  database is missing — the workflow runs it after the breadth sync — so a
+  wiped Actions cache (or a fresh clone) doesn't make the next export drop the
+  stats of matches older than the providers' look-back. It only adds what is
+  missing, keyed on provider ids, and never overwrites fresher data.
 
 ## Roadmap
 
@@ -301,3 +359,9 @@ How it holds together:
 9. ✅ Football-Data.co.uk depth provider — shots / shots on target / corners /
    fouls / cards / team xG on **all 5** tracked leagues' match pages (not just
    PL), the "Match stats" card. Free CSV, no key.
+10. ✅ UEFA provider for the **Champions League and Europa League** (fixtures,
+    league-phase table, scorers, lineups, events, and team stats counted from
+    the event feed — `app/providers/uefa.py`, `--uefa`), clubs matched onto their
+    league teams; server-side merge of multiple sources' team stats with
+    provenance (`app/merge.py`); gap-driven enrichers; restore-from-snapshot
+    (`app/restore_static.py`) and a coverage report (`app/report.py`).

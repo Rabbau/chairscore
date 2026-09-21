@@ -9,6 +9,7 @@ Cadence (see .env):
 * matches in a date window   - every 15 min
 * standings + scorers        - every 6h
 * reference data (teams)     - every 24h
+* UEFA fixtures + depth      - every 30 min (Champions / Europa League)
 """
 
 from __future__ import annotations
@@ -27,7 +28,13 @@ from app.ingest.sync import (
     sync_reference_data,
     sync_standings_and_scorers,
 )
-from app.providers import get_depth_provider, get_fdcouk_provider, get_fpl_provider
+from app.ingest.uefa import run_uefa_sync
+from app.providers import (
+    get_depth_provider,
+    get_fdcouk_provider,
+    get_fpl_provider,
+    get_uefa_provider,
+)
 
 log = logging.getLogger("chairscore.scheduler")
 
@@ -55,6 +62,8 @@ def _initial_sync() -> None:
         steps.append(enrich_fpl_matches)
     if get_fdcouk_provider() is not None:
         steps.append(enrich_fdcouk_matches)
+    if get_uefa_provider() is not None:
+        steps.append(run_uefa_sync)
     for step in steps:
         try:
             step()
@@ -118,14 +127,24 @@ def start_scheduler() -> BackgroundScheduler:
             next_run_time=now + timedelta(hours=ch),
             max_instances=1, coalesce=True,
         )
+    if get_uefa_provider() is not None:
+        um = settings.sync_uefa_minutes
+        sched.add_job(
+            _safe(run_uefa_sync), "interval",
+            minutes=um, id="uefa",
+            next_run_time=now + timedelta(minutes=um),
+            max_instances=1, coalesce=True,
+        )
     sched.start()
     _scheduler = sched
     log.info(
-        "scheduler started (initial in 15s; then matches/%dm, standings/%dh, reference/%dh%s%s%s)",
+        "scheduler started (initial in 15s; then matches/%dm, standings/%dh, "
+        "reference/%dh%s%s%s%s)",
         m, settings.sync_standings_hours, settings.sync_reference_hours,
         f", depth/{settings.sync_depth_hours}h" if get_depth_provider() is not None else "",
         f", fpl/{settings.sync_fpl_hours}h" if get_fpl_provider() is not None else "",
         f", fdcouk/{settings.sync_fdcouk_hours}h" if get_fdcouk_provider() is not None else "",
+        f", uefa/{settings.sync_uefa_minutes}m" if get_uefa_provider() is not None else "",
     )
     return sched
 

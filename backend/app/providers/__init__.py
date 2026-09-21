@@ -12,6 +12,8 @@ so swapping or adding a provider never touches the DB code.
   League season (Fantasy Premier League: per-player goals/assists/bonus/BPS/xG).
 * ``get_fdcouk_provider()`` — the optional depth source for team-level match
   stats (shots/corners/cards/xG) across every tracked competition (Football-Data.co.uk).
+* ``get_uefa_provider()``  — breadth + depth for the Champions League and Europa
+  League (uefa.com's own backends): fixtures, tables, scorers, lineups, events.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from app.providers.base import BaseProvider
 from app.providers.football_data import FootballDataProvider
 from app.providers.football_data_co_uk import FootballDataCoUkProvider
 from app.providers.fpl import FplProvider
+from app.providers.uefa import UefaProvider
 
 
 def get_provider() -> BaseProvider:
@@ -65,14 +68,31 @@ def get_fdcouk_provider() -> FootballDataCoUkProvider | None:
     )
 
 
+def get_uefa_provider() -> UefaProvider | None:
+    """The UEFA provider, or None if disabled / no competitions configured."""
+    codes = settings.uefa_competition_codes
+    if not codes:
+        return None
+    return UefaProvider(
+        competitions=codes,
+        matches_url=settings.uefa_matches_url,
+        standings_url=settings.uefa_standings_url,
+        stats_url=settings.uefa_stats_url,
+        min_request_interval=settings.uefa_min_request_interval,
+        include_qualifying=settings.uefa_include_qualifying,
+    )
+
+
 __all__ = [
     "BaseProvider",
     "FootballDataProvider",
     "ApiFootballProvider",
     "FplProvider",
     "FootballDataCoUkProvider",
+    "UefaProvider",
     "get_provider",
     "get_depth_provider",
     "get_fpl_provider",
     "get_fdcouk_provider",
+    "get_uefa_provider",
 ]

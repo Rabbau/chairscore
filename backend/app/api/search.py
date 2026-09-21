@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db import get_db
 from app.models import Competition, Team
 from app.schemas.search import SearchOut
@@ -26,7 +27,10 @@ def search(
     ).all()
     comps = db.scalars(
         select(Competition)
-        .where(or_(Competition.name.ilike(like), Competition.code.ilike(q.strip())))
+        .where(
+            or_(Competition.name.ilike(like), Competition.code.ilike(q.strip())),
+            Competition.code.in_(settings.served_competition_codes),
+        )
         .order_by(Competition.name)
         .limit(5)
     ).all()

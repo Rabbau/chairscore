@@ -44,6 +44,9 @@ class Match(Base):
     away_score: Mapped[int | None] = mapped_column(default=None)
     home_score_ht: Mapped[int | None] = mapped_column(default=None)
     away_score_ht: Mapped[int | None] = mapped_column(default=None)
+    # Penalty shoot-out score (cup ties only); home/away_score exclude it.
+    home_score_pen: Mapped[int | None] = mapped_column(default=None)
+    away_score_pen: Mapped[int | None] = mapped_column(default=None)
     winner: Mapped[str | None] = mapped_column(String(12), default=None)
     duration: Mapped[str | None] = mapped_column(String(20), default=None)
     venue: Mapped[str | None] = mapped_column(String(160), default=None)
@@ -60,6 +63,8 @@ class Match(Base):
     fpl_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     # Set when football-data.co.uk (shots/corners/cards/xG) last enriched this match.
     fdcouk_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # Set when UEFA's lineups + event feed last enriched this match.
+    uefa_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     competition: Mapped[Competition] = relationship()  # noqa: F821

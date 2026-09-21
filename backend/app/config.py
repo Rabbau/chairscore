@@ -39,8 +39,9 @@ class Settings(BaseSettings):
     # ~1 call per gameweek.
     fpl_fetch_player_xg: bool = True
     fpl_competition: str = "PL"
+    # Per run, at most this many matches (newest first) of the current season
+    # that don't have FPL data yet — so the backlog fills in over a few runs.
     fpl_max_matches_per_run: int = 12
-    fpl_window_days: int = 14
 
     # Depth source — Football-Data.co.uk (free CSV, no key: shots, corners,
     # cards, and team xG for every tracked league, not just one)
@@ -50,7 +51,22 @@ class Settings(BaseSettings):
     # One CSV per competition-season covers every match in it, so this is a
     # budget on DB rows touched per run, not on network calls.
     fdcouk_max_matches_per_run: int = 60
-    fdcouk_window_days: int = 14
+
+    # Breadth + depth source for the UEFA club competitions — official uefa.com
+    # backends (no key). football-data.org's free plan has the Champions League
+    # but not the Europa League, so UEFA owns both: fixtures, tables, scorers,
+    # lineups and the event feed that per-match team stats are derived from.
+    uefa_enabled: bool = True
+    uefa_competitions: str = "CL,EL"
+    uefa_matches_url: str = "https://match.uefa.com/v5"
+    uefa_standings_url: str = "https://standings.uefa.com/v1"
+    uefa_stats_url: str = "https://compstats.uefa.com/v1"
+    uefa_min_request_interval: float = 0.4
+    # Qualifying rounds (July-August, dozens of small clubs) are skipped by
+    # default; the league phase and knockouts are what people follow.
+    uefa_include_qualifying: bool = False
+    # Depth (lineups + event feed) costs ~4 requests per match.
+    uefa_max_matches_per_run: int = 40
 
     # Database
     database_url: str = "sqlite:///./chairscore.db"
@@ -71,13 +87,32 @@ class Settings(BaseSettings):
     sync_depth_hours: int = 12
     sync_fpl_hours: int = 6
     sync_fdcouk_hours: int = 6
+    sync_uefa_minutes: int = 30
     # Match sync window, relative to today (days).
     match_window_past_days: int = 3
     match_window_future_days: int = 10
 
     @property
     def tracked_competition_codes(self) -> list[str]:
-        return [c.strip().upper() for c in self.tracked_competitions.split(",") if c.strip()]
+        """Competitions synced from football-data.org. A code owned by UEFA is
+        dropped here so the two sources never write the same competition."""
+        owned = set(self.uefa_competition_codes)
+        return [
+            c.strip().upper()
+            for c in self.tracked_competitions.split(",")
+            if c.strip() and c.strip().upper() not in owned
+        ]
+
+    @property
+    def uefa_competition_codes(self) -> list[str]:
+        if not self.uefa_enabled:
+            return []
+        return [c.strip().upper() for c in self.uefa_competitions.split(",") if c.strip()]
+
+    @property
+    def served_competition_codes(self) -> list[str]:
+        """Every competition the site actually has data for."""
+        return self.tracked_competition_codes + self.uefa_competition_codes
 
     @property
     def depth_competition_codes(self) -> list[str]:

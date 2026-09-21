@@ -35,6 +35,9 @@ class NTeam:
     coach_name: str | None = None
     area_name: str | None = None
     squad: list[NPlayer] = field(default_factory=list)
+    # Other spellings the source uses for this club — only consulted when a
+    # source has to be matched onto teams that came from a different provider.
+    aliases: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -147,6 +150,8 @@ class NMatch:
     away_score: int | None = None
     home_score_ht: int | None = None
     away_score_ht: int | None = None
+    home_score_pen: int | None = None  # penalty shoot-out, when there was one
+    away_score_pen: int | None = None
     winner: str | None = None
     duration: str | None = None
     venue: str | None = None

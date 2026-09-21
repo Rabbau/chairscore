@@ -9,6 +9,7 @@ from app.ingest.sync import (
     sync_reference_data,
     sync_standings_and_scorers,
 )
+from app.ingest.uefa import enrich_uefa_matches, run_uefa_sync
 
 __all__ = [
     "run_full_sync",
@@ -18,4 +19,6 @@ __all__ = [
     "enrich_depth_matches",
     "enrich_fpl_matches",
     "enrich_fdcouk_matches",
+    "enrich_uefa_matches",
+    "run_uefa_sync",
 ]

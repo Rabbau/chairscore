@@ -12,6 +12,7 @@ from app.ingest.sync import (
     sync_reference_data,
     sync_standings_and_scorers,
 )
+from app.ingest.uefa import run_uefa_sync
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -23,13 +24,14 @@ _JOBS = {
     "depth": enrich_depth_matches,
     "fpl": enrich_fpl_matches,
     "fdcouk": enrich_fdcouk_matches,
+    "uefa": run_uefa_sync,
 }
 
 
 @router.post("/sync")
 def trigger_sync(
     background: BackgroundTasks,
-    mode: str = Query("full", pattern="^(full|matches|standings|reference|depth|fpl|fdcouk)$"),
+    mode: str = Query("full", pattern="^(full|matches|standings|reference|depth|fpl|fdcouk|uefa)$"),
     x_admin_token: str = Header(default=""),
 ):
     if not settings.admin_token or x_admin_token != settings.admin_token:

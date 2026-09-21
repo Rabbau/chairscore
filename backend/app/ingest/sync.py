@@ -11,9 +11,10 @@ Design notes
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -46,6 +47,13 @@ log = logging.getLogger("chairscore.ingest")
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def current_season_of(db: Session, comp: Competition) -> str | None:
+    """The season a competition is in now — what the enrichers fill holes for."""
+    return comp.current_season or db.scalar(
+        select(func.max(Match.season)).where(Match.competition_id == comp.id)
+    )
 
 
 def _naive_utc(dt: datetime | None) -> datetime | None:
@@ -102,6 +110,12 @@ def _replace_squad(db: Session, team: Team, n: NTeam) -> None:
     db.flush()
 
 
+# How a provider's team turns into a ``Team`` row. football-data.org's ids are
+# the primary key space (``upsert_team``); UEFA plugs in a resolver that first
+# tries to recognise a club we already know from a league.
+TeamResolver = Callable[[Session, NTeam], Team]
+
+
 def upsert_competition(db: Session, n: NCompetition) -> Competition:
     comp = db.scalar(select(Competition).where(Competition.provider_id == n.provider_id))
     if comp is None:
@@ -134,10 +148,10 @@ def _get_or_create_competition(db: Session, code: str, provider_id: int | None) 
     return comp
 
 
-def upsert_match(db: Session, n: NMatch) -> Match:
+def upsert_match(db: Session, n: NMatch, resolve: TeamResolver = upsert_team) -> Match:
     comp = _get_or_create_competition(db, n.competition_code, n.competition_provider_id)
-    home = upsert_team(db, n.home_team)
-    away = upsert_team(db, n.away_team)
+    home = resolve(db, n.home_team)
+    away = resolve(db, n.away_team)
 
     match = db.scalar(select(Match).where(Match.provider_id == n.provider_id))
     if match is None:
@@ -158,6 +172,8 @@ def upsert_match(db: Session, n: NMatch) -> Match:
     match.away_score = n.away_score
     match.home_score_ht = n.home_score_ht
     match.away_score_ht = n.away_score_ht
+    match.home_score_pen = n.home_score_pen
+    match.away_score_pen = n.away_score_pen
     match.winner = n.winner
     match.duration = n.duration
     match.venue = n.venue
@@ -197,14 +213,14 @@ def _replace_match_events(db: Session, match: Match, n: NMatch, team_ids: dict[i
     db.flush()
 
 
-def replace_standings(db: Session, n: NStandings) -> None:
+def replace_standings(db: Session, n: NStandings, resolve: TeamResolver = upsert_team) -> None:
     comp = upsert_competition(db, n.competition)
     season = n.season or comp.current_season or str(_now().year)
     db.execute(
         delete(Standing).where(Standing.competition_id == comp.id, Standing.season == season)
     )
     for row in n.rows:
-        team = upsert_team(db, row.team)
+        team = resolve(db, row.team)
         db.add(Standing(
             competition_id=comp.id, season=season, stage=row.stage, type=row.type,
             group_name=row.group, team_id=team.id, position=row.position, played=row.played,
@@ -215,12 +231,18 @@ def replace_standings(db: Session, n: NStandings) -> None:
     db.flush()
 
 
-def replace_scorers(db: Session, comp: Competition, season: str, scorers: list[NScorer]) -> None:
+def replace_scorers(
+    db: Session,
+    comp: Competition,
+    season: str,
+    scorers: list[NScorer],
+    resolve: TeamResolver = upsert_team,
+) -> None:
     db.execute(
         delete(Scorer).where(Scorer.competition_id == comp.id, Scorer.season == season)
     )
     for s in scorers:
-        team = upsert_team(db, s.team) if s.team else None
+        team = resolve(db, s.team) if s.team else None
         db.add(Scorer(
             competition_id=comp.id, season=season, player_provider_id=s.player_provider_id,
             player_name=s.player_name, position=s.position, nationality=s.nationality,
@@ -252,6 +274,8 @@ def sync_competitions(db: Session, provider: BaseProvider) -> int:
     except ProviderError as exc:
         log.warning("competitions list skipped: %s", exc)
         return 0
+    owned = set(settings.uefa_competition_codes)  # UEFA is the source of truth for these
+    comps = [n for n in comps if n.code not in owned]
     for n in comps:
         upsert_competition(db, n)
     db.commit()
@@ -337,8 +361,24 @@ def _codes() -> list[str]:
     return settings.tracked_competition_codes
 
 
+def _uefa(fn_name: str, *args) -> None:
+    """Run a UEFA step. Imported lazily: ``ingest.uefa`` builds on this module."""
+    from app.ingest import uefa
+
+    getattr(uefa, fn_name)(*args)
+
+
+def _split_codes(codes: list[str] | None) -> tuple[list[str], bool]:
+    """(football-data.org codes, whether UEFA should run too). No explicit list
+    means everything; an explicit list runs UEFA only if it names one of its codes."""
+    owned = set(settings.uefa_competition_codes)
+    if codes is None:
+        return _codes(), bool(owned)
+    return [c for c in codes if c not in owned], any(c in owned for c in codes)
+
+
 def run_full_sync(codes: list[str] | None = None) -> None:
-    codes = codes or _codes()
+    codes, with_uefa = _split_codes(codes)
     provider = get_provider()
     with SessionLocal() as db:
         sync_competitions(db, provider)
@@ -352,6 +392,8 @@ def run_full_sync(codes: list[str] | None = None) -> None:
                 log.exception("[%s] sync failed", code)
                 db.rollback()
     log.info("full sync complete for %s", ", ".join(codes))
+    if with_uefa:
+        _uefa("sync_uefa_full")
 
 
 def sync_reference_data() -> None:
@@ -368,12 +410,13 @@ def sync_standings_and_scorers() -> None:
         for code in _codes():
             sync_standings(db, provider, code)
             sync_scorers(db, provider, code)
+    _uefa("sync_uefa_standings_and_scorers")
 
 
 def sync_history(seasons: list[str], codes: list[str] | None = None) -> None:
     """Backfill past seasons — results, final tables, top scorers — for the
     season switcher and head-to-head."""
-    codes = codes or _codes()
+    codes, with_uefa = _split_codes(codes)
     provider = get_provider()
     with SessionLocal() as db:
         for season in seasons:
@@ -381,6 +424,8 @@ def sync_history(seasons: list[str], codes: list[str] | None = None) -> None:
                 sync_matches(db, provider, code, season=season)
                 sync_standings(db, provider, code, season=season)
                 sync_scorers(db, provider, code, season=season)
+    if with_uefa:
+        _uefa("sync_uefa_history", seasons)
     log.info("history backfill complete: seasons %s", ", ".join(seasons))
 
 

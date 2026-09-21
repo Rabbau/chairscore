@@ -9,6 +9,7 @@ Examples
     python -m app.ingest --depth                # API-Football events/stats/ratings
     python -m app.ingest --fpl                  # FPL per-player data (current PL season)
     python -m app.ingest --fdcouk               # Football-Data.co.uk match stats (all leagues)
+    python -m app.ingest --uefa                 # Champions/Europa League: fixtures + lineups/events
     python -m app.ingest --seasons 2023,2024    # backfill past-season results
 """
 
@@ -28,6 +29,7 @@ from app.ingest.sync import (
     sync_reference_data,
     sync_standings_and_scorers,
 )
+from app.ingest.uefa import run_uefa_sync
 from app.migrations import run_migrations
 from app.seed import seed_competitions
 
@@ -49,6 +51,10 @@ def main() -> None:
     parser.add_argument(
         "--fdcouk", action="store_true",
         help="enrich recent matches with Football-Data.co.uk team stats (all tracked leagues)",
+    )
+    parser.add_argument(
+        "--uefa", action="store_true",
+        help="Champions/Europa League: recent fixtures, then lineups + events for new results",
     )
     parser.add_argument(
         "--seasons", help="comma-separated past seasons to backfill, e.g. 2023,2024",
@@ -82,10 +88,12 @@ def main() -> None:
         enrich_fpl_matches()
     elif args.fdcouk:
         enrich_fdcouk_matches()
+    elif args.uefa:
+        run_uefa_sync()
     else:
         run_full_sync(codes)
 
-    print("done. tracked competitions:", ", ".join(codes or settings.tracked_competition_codes))
+    print("done. tracked competitions:", ", ".join(codes or settings.served_competition_codes))
 
 
 if __name__ == "__main__":

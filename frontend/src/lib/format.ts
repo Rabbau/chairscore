@@ -49,3 +49,27 @@ export function resultFor(m: Match, teamId: number): FormResult | null {
   const ga = isHome ? m.away_score : m.home_score
   return gf > ga ? 'W' : gf < ga ? 'L' : 'D'
 }
+
+const STAGE_LABELS: Record<string, string> = {
+  LEAGUE_STAGE: 'League phase',
+  GROUP_STAGE: 'Group stage',
+  PLAYOFFS: 'Knockout play-off',
+  LAST_16: 'Round of 16',
+  QUARTER_FINALS: 'Quarter-finals',
+  SEMI_FINALS: 'Semi-finals',
+  FINAL: 'Final',
+}
+
+/** Human label for a cup stage; null for a plain league season. */
+export function stageLabel(stage: string | null | undefined): string | null {
+  return stage ? (STAGE_LABELS[stage] ?? null) : null
+}
+
+/** "League phase · Matchday 3", "Round of 16" ... — what a fixture list is sectioned by. */
+export function roundLabel(m: Pick<Match, 'stage' | 'matchday'>): string | null {
+  const stage = stageLabel(m.stage)
+  if (!stage) return null
+  return (m.stage === 'LEAGUE_STAGE' || m.stage === 'GROUP_STAGE') && m.matchday
+    ? `${stage} · Matchday ${m.matchday}`
+    : stage
+}

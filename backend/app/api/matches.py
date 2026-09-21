@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import match_query
 from app.db import get_db
+from app.merge import merge_team_stats
 from app.models import Competition, Match
 from app.schemas import MatchDetailOut, MatchOut
-from app.schemas.match import HeadToHeadOut
+from app.schemas.match import HeadToHeadOut, MergedTeamStatOut
 
 router = APIRouter(prefix="/api/matches", tags=["matches"])
 
@@ -111,6 +112,9 @@ def get_match(match_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, f"match {match_id} not found")
 
     detail = MatchDetailOut.model_validate(match)
+    detail.merged_team_stats = [
+        MergedTeamStatOut(**m) for m in merge_team_stats(match.team_stats)
+    ]
     # best performers first: API-Football rating, else FPL bps
     detail.player_ratings.sort(
         key=lambda r: (r.rating or 0, r.bps or 0, r.goals or 0), reverse=True

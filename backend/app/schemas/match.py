@@ -63,6 +63,27 @@ class TeamStatOut(BaseModel):
     xg: float | None = None
 
 
+class MergedTeamStatOut(BaseModel):
+    """One team's stats with every source folded together (see ``app.merge``)."""
+
+    team_id: int
+    sources: list[str] = []
+    # stat -> the source its value came from
+    field_sources: dict[str, str] = {}
+    possession: int | None = None
+    shots: int | None = None
+    shots_on_target: int | None = None
+    corners: int | None = None
+    fouls: int | None = None
+    offsides: int | None = None
+    yellow_cards: int | None = None
+    red_cards: int | None = None
+    passes: int | None = None
+    passes_accuracy: int | None = None
+    saves: int | None = None
+    xg: float | None = None
+
+
 class PlayerRatingOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -101,6 +122,8 @@ class MatchOut(BaseModel):
     away_score: int | None = None
     home_score_ht: int | None = None
     away_score_ht: int | None = None
+    home_score_pen: int | None = None
+    away_score_pen: int | None = None
     winner: str | None = None
     competition: CompetitionRef
     home_team: TeamOut
@@ -124,6 +147,7 @@ class MatchDetailOut(MatchOut):
     bookings: list[BookingOut] = []
     substitutions: list[SubstitutionOut] = []
     team_stats: list[TeamStatOut] = []
+    merged_team_stats: list[MergedTeamStatOut] = []
     player_ratings: list[PlayerRatingOut] = []
     head_to_head: HeadToHeadOut | None = None
     home_form: list[MatchOut] = []
